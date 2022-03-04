@@ -4,8 +4,7 @@
   "description": "A Paw Extension to export GraphQL docs.",
   "main": "src/index.ts",
   "license": "MIT",
-  "repository": "git@github.com:luckymarmot/Paw-OpenAPI3Generator.git",
-  "browser": "window",
+  "repository": "git@github.com:luckymarmot/graphqldocs.git",
   "scripts": {
     "start": "yarn dev:mac",
     "dev:mac": "bash -c \"./node_modules/.bin/webpack --node-env development --watch -o $HOME/$npm_package_config_outputDir/$npm_package_config_identifier\"",
