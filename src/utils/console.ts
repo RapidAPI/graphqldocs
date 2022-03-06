@@ -65,13 +65,10 @@ function pseudoLog(..._args: unknown[]): void {
     typeof arg === 'object' ? parseObjects(arg) : arg,
   )
 
-  if (typeof _args === 'object') {
-    const objtype = Array.isArray(args) ? 'Array' : 'Object'
-    args.unshift(`${objtype}: `)
-  } else {
-    args.unshift(`${typeof args}: `)
+  if (args.length > 0 && typeof args === 'object') {
+    log.apply(console, args)
+    return
   }
-
   log.apply(console, args)
 }
 

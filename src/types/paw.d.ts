@@ -41,7 +41,7 @@ export class DynamicString {
   appendDynamicString(dynamicString: DynamicString): void
 }
 
-export type GQLVariablesType = {
+export type GraphQLDynamicValueType = {
   identifier: string
   data: {
     environmentVariable: string
@@ -49,6 +49,13 @@ export type GQLVariablesType = {
   }
   uuid: string
 }
+
+export type GraphQLVariablesType =
+  | Record<
+      GraphQLDynamicValueType | Array<GraphQLDynamicValueType>,
+      GraphQLDynamicValueType | Array<GraphQLDynamicValueType> | unknown
+    >
+  | string
 
 export class DynamicValue {
   public type: string
@@ -58,7 +65,7 @@ export class DynamicValue {
   variableUUID: string
   // @todo: confirm whether bookmarkData field should be accessed publicly
   bookmarkData?: string
-  gqlVariables: Array<GQLVariablesType | string>
+  gqlVariables: GraphQLVariablesType
   gqlQuery: {
     components: string[]
   }

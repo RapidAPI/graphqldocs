@@ -1,7 +1,19 @@
-import { DynamicString, DynamicValue, GQLVariablesType, Paw } from 'types/paw.d'
+import {
+  DynamicString,
+  DynamicStringComponent,
+  DynamicValue,
+  GraphQLDynamicValueType,
+  GraphQLVariablesType,
+  Paw,
+} from 'types/paw.d'
 import qs from 'qs'
 import { format } from 'graphql-formatter'
 import config from '../paw.config'
+
+export type DynamicStringComponentPairType = [
+  DynamicStringComponent,
+  DynamicStringComponent,
+]
 
 const { identifier, title, inputs, fileExtensions } = config
 
@@ -16,7 +28,6 @@ function parseJson<T>(value: string) {
    */
   const regex = /(\/\*(?:(?!\/\*|\*\/)[\s\S])*\*\/|(\/\*|\*\/))/g
   const content = value.replace(regex, '')
-
   try {
     return JSON.parse(content)
   } catch (error: unknown) {
@@ -402,120 +413,156 @@ export default class GraphQLDocGenerator implements Paw.Generator {
     if (variables) {
       content +=
         template('json', variables, title.concat(' Variables'), collapsed) +
-        '\n'
+        '\n\n'
     }
 
     if (/(query)/g.test(query)) {
-      content += template(
-        'graphql',
-        format(query),
-        title.concat(' Query'),
-        collapsed,
-      )
+      content +=
+        template('graphql', format(query), title.concat(' Query'), collapsed) +
+        '\n\n'
     }
 
     if (/(mutation)/g.test(query)) {
-      content += template(
-        'graphql',
-        format(query),
-        title.concat(' Mutation'),
-        collapsed,
-      )
+      content +=
+        template(
+          'graphql',
+          format(query),
+          title.concat(' Mutation'),
+          collapsed,
+        ) + '\n\n'
     }
 
-    return content
+    return content + '\n'
   }
 
-  private getGqlValues(variables: Array<GQLVariablesType | string>): string {
-    const context = this.ctx
+  private getDynamicValues(
+    data:
+      | Array<GraphQLDynamicValueType>
+      | GraphQLDynamicValueType
+      | Record<string, GraphQLDynamicValueType>,
+  ): string | Record<string, unknown> | Array<unknown> {
+    const hasProp = Object.prototype.hasOwnProperty
 
+    if (Array.isArray(data)) {
+      return [...data].map((i) => this.getDynamicValues(i)).join('')
+    }
+
+    if (
+      hasProp.call(data, 'identifier') &&
+      hasProp.call(data, 'data') &&
+      hasProp.call(data, 'uuid')
+    ) {
+      return this.dynamicValueToString(data as GraphQLDynamicValueType)
+    }
+
+    return data
+  }
+
+  private parseToJs(data: any): any {
+    if (typeof data === 'object' && !Array.isArray(data)) {
+      const obj = Object.keys(data).map((key) => {
+        if (data[key] && typeof data[key] === 'object') {
+          return [key, this.parseToJs(data[key])]
+        }
+
+        if (data[key] && typeof data[key] === 'string') {
+          return [key, this.getDynamicValues(parseJson(data[key]))]
+        }
+
+        return [key, data[key]]
+      })
+      return Object.fromEntries(obj)
+    }
+
+    if (typeof data === 'object' && Array.isArray(data)) {
+      return [...data].map((item) => {
+        if (typeof item === 'object') {
+          return this.parseToJs(item)
+        }
+        if (typeof item === 'string') {
+          return this.getDynamicValues(parseJson(item))
+        }
+        return item
+      })
+    }
+    return data
+  }
+
+  private getGqlValues(variables: GraphQLVariablesType): string {
     if (typeof variables !== 'string') {
       return ''
     }
 
     try {
       const vars = parseJson(variables)
-      const cmps = Object.keys(vars)
+      const cmps: Array<DynamicStringComponentPairType> = Object.keys(vars)
         .map((key) => [key, vars[key]])
-        .map(([key, value]) => {
-          if (typeof value === 'string') {
-            return [key, parseJson(value) || value]
-          }
-          return [key, value]
-        })
-        .map(([key, value]) => {
-          if (typeof value === 'object' && Array.isArray(value)) {
-            const arrValues = [...value].map((i) =>
-              this.extractDynamicValue(i, context),
-            )
-            return [key, arrValues.join('')]
-          }
-          if (typeof value === 'object' && !Array.isArray(value)) {
-            const objValues = this.extractDynamicValue(value, context)
-            return [key, objValues]
-          }
-          return [key, value]
-        })
-
-      const components = Object.fromEntries(cmps)
-      return Object.keys(components).length > 0
-        ? JSON.stringify(components, null, 2)
+        .map(([key, value]: DynamicStringComponentPairType) => [
+          typeof key === 'string'
+            ? this.getDynamicValues(parseJson<GraphQLVariablesType>(key))
+            : key,
+          typeof value === 'string'
+            ? this.getDynamicValues(parseJson<GraphQLVariablesType>(value))
+            : value,
+        ]) as Array<DynamicStringComponentPairType>
+      const output = this.parseToJs(Object.fromEntries(cmps))
+      return Object.keys(output).length > 0
+        ? JSON.stringify(output, null, 2)
         : ''
     } catch (err: unknown) {
-      return '// need to fix this'
+      return (err as Error).message
     }
   }
 
-  private extractDynamicValue(
-    value: GQLVariablesType | string | Array<GQLVariablesType | string>,
-    context: Paw.Context,
-  ): string {
-    if (typeof value === 'object') {
-      return this.dynamicValueToString(value as GQLVariablesType)
-    }
-
-    const content = parseJson(value) as
-      | GQLVariablesType
-      | string
-      | Array<GQLVariablesType | string>
-
-    if (!Array.isArray(content)) {
-      return content as string
-    }
-
-    if (Array.isArray(content)) {
-      const a = content as Array<GQLVariablesType | string>
-      const b = a.map((i) =>
-        typeof i !== 'string' ? this.dynamicValueToString(i) : i,
-      )
-      return b.join('')
-    }
-
-    return content
-  }
-
-  private dynamicValueToString(a: GQLVariablesType | string): string {
+  private dynamicValueToString(data: GraphQLDynamicValueType | string): string {
     const context = this.ctx
 
-    if (typeof a === 'string') {
-      return a
+    if (typeof data === 'string') {
+      return data
     }
 
-    if (a.identifier === 'com.luckymarmot.EnvironmentVariableDynamicValue') {
-      const env = context.getEnvironmentVariableById(
-        a.data.environmentVariable,
-      ) as Paw.EnvironmentVariable
-      return (env.getCurrentValue(false) as string) || 'null'
-    }
+    switch (data.identifier) {
+      case 'com.luckymarmot.EnvironmentVariableDynamicValue':
+        const env = context.getEnvironmentVariableById(
+          data.data.environmentVariable,
+        ) as Paw.EnvironmentVariable
+        return (env.getCurrentValue(false) as string) || 'null'
 
-    if (a.identifier === 'com.luckymarmot.RequestVariableDynamicValue') {
-      return a.identifier
-    }
+      case 'com.luckymarmot.HashDynamicValue':
+        return '[HashDynamicValue is not yet supported.]'
 
-    if (a.identifier === 'com.luckymarmot.LocalValueDynamicValue') {
-      return a.identifier
-    }
+      case 'com.luckymarmot.AmazonS3HeaderDynamicValue':
+        return '[AmazonS3HeaderDynamicValue is not yet supported.]'
 
-    return a.identifier
+      case 'com.luckymarmot.CompressionDynamicValue':
+        return '[CompressionDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.EscapeSequenceDynamicValue':
+        return '[EscapeSequenceDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.HMACDynamicValue':
+        return '[HMACDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.BasicAuthDynamicValue':
+        return '[BasicAuthDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.CustomDynamicValue':
+        return '[CustomDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.CustomDynamicValue':
+        return '[CustomDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.JSONDynamicValue':
+        return '[JSONDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.RequestVariableDynamicValue':
+        return '[RequestVariableDynamicValue is not yet supported.]'
+
+      case 'com.luckymarmot.LocalValueDynamicValue ':
+        return '[LocalValueDynamicValue  is not yet supported.]'
+
+      default:
+        return data.identifier
+    }
   }
 }
