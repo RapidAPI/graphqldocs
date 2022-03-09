@@ -420,16 +420,10 @@ export default class GraphQLDocGenerator implements Paw.Generator {
       content +=
         template('graphql', format(query), title.concat(' Query'), collapsed) +
         '\n\n'
-    }
-
-    if (/(mutation)/g.test(query)) {
+    } else if (/(mutation)/g.test(query)) {
       content +=
-        template(
-          'graphql',
-          format(query),
-          title.concat(' Mutation'),
-          collapsed,
-        ) + '\n\n'
+        template('graphql', query, title.concat(' Mutation'), collapsed) +
+        '\n\n'
     }
 
     return content + '\n'
