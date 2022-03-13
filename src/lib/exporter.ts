@@ -9,6 +9,7 @@ import {
 import qs from 'qs'
 import { format } from 'graphql-formatter'
 import config from '../paw.config'
+import { logger } from 'utils'
 
 export type DynamicStringComponentPairType = [
   DynamicStringComponent,
@@ -53,6 +54,21 @@ function template(
     return wrap
   }
   return tmpl
+}
+
+function frontMatter(
+  request: Paw.Request,
+  user: string,
+  group: string[],
+): string {
+  return `---
+title: "${request.name.trim().replace(/^\w/, (c) => c.toUpperCase())}"
+description: ""
+updated: "${new Date().toISOString()}"
+group: "${group.length > 0 ? group[0] : ''}"
+breadcrumb: ${group.length > 0 ? JSON.stringify(group) : ''}
+author: "${user}"
+---\n\n`
 }
 
 export default class GraphQLDocGenerator implements Paw.Generator {
@@ -112,51 +128,90 @@ export default class GraphQLDocGenerator implements Paw.Generator {
       return subdocs.join('\n')
     }
 
-    const rootRequests = context
-      .getRootRequests()
-      .map((i) => this.buildRequestDoc(i, context.user as Paw.UserInfo))
+    // const rootRequests = context
+    //   .getRootRequests()
+    //   .map((i) => this.buildRequestDoc(i, context.user as Paw.UserInfo))
 
-    const rootGroups = context
-      .getRootGroups()
+    const requestItems = context
+      .getAllRequestTreeItems()
       .map((i) => this.buildRequestGroup(i, context.user as Paw.UserInfo))
       .join('\n')
 
-    return [document, rootRequests, rootGroups].join('\n')
+    return [document, requestItems].join('\n')
   }
 
   private buildRequestGroup(
-    group: Paw.RequestGroup,
+    requestItem: Paw.RequestGroup | Paw.Request,
     user: Paw.UserInfo,
+    tree: string[] = [],
   ): string {
-    const children = group
-      .getChildren()
-      .map((item: Paw.RequestGroup | Paw.Request) => {
-        if (Object.prototype.hasOwnProperty.call(item, 'getChildren')) {
-          return this.buildRequestGroup(item as Paw.RequestGroup, user)
-        }
+    const children: string[] = []
 
-        const req = item as Paw.Request
-        if (req && req.method) {
-          return this.buildRequestDoc(req, user)
-        }
-      })
-      .join('\n')
+    const requestItemParent = requestItem.parent
+    if (requestItemParent && requestItemParent.parent) {
+      tree.push(requestItemParent.parent.name, requestItemParent.name)
+    }
 
-    return [`\n## ${group.name}\n`, children].join('\n')
+    if (requestItemParent && !requestItemParent.parent) {
+      tree.push(requestItemParent?.name)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(requestItem, 'getChildren')) {
+      const items = (requestItem as Paw.RequestGroup)
+        .getChildren()
+        .map((item: Paw.RequestGroup | Paw.Request) => {
+          if (Object.prototype.hasOwnProperty.call(item, 'getChildren')) {
+            return this.buildRequestGroup(item as Paw.RequestGroup, user, tree)
+          }
+
+          const req = item as Paw.Request
+          if (req && req.method) {
+            return this.buildRequestDoc(req, user, tree)
+          }
+        })
+        .join('\n')
+
+      children.push(`\n## ${requestItem.name}\n`, items)
+    } else {
+      const item = this.buildRequestDoc(requestItem, user, tree)
+      // children.push(item)
+      logger.log(item)
+    }
+
+    return children.join('\n')
   }
 
-  private buildRequestDoc(request: Paw.Request, user: Paw.UserInfo): string {
-    const updateText = `\n<small>Last updated [date], by [user].</small>`
+  private buildRequestDoc(
+    request: Paw.Request,
+    user: Paw.UserInfo,
+    tree: string[] = [],
+  ): string {
+    if (Object.prototype.hasOwnProperty.call(request, 'getChildren')) {
+      return ''
+    }
+
     const isDescriptionEmpty =
-      request.description.trim().length === 0 ||
+      (request && request.description && request.description.length === 0) ||
       !/(<!--.?.*.?-->)/gm.test(request.description)
 
+    const parent = request.parent
+
+    if (parent) {
+      const top = parent.parent
+      if (top) {
+        tree.push(top.name, parent.name)
+      } else {
+        tree.push(parent.name)
+      }
+    }
+
     if (isDescriptionEmpty) {
-      let defaultDoc = `### ${request.name}\n`
+      let defaultDoc = frontMatter(request, user.username as string, tree)
 
-      defaultDoc += `\n${request.description}\n`
+      defaultDoc += `### ${request.name}\n`
+      defaultDoc += `${request.description}\n`
 
-      defaultDoc += '\n#### Request\n'
+      defaultDoc += '#### Request\n'
       defaultDoc += this.insertRequestHeaders(request, true)
       defaultDoc += this.insertRequestQueryParams(request, true)
       defaultDoc += this.insertRequestBody(request, true)
@@ -167,10 +222,6 @@ export default class GraphQLDocGenerator implements Paw.Generator {
         defaultDoc += this.insertResponseBody(request, true)
       }
 
-      defaultDoc += '\n---\n'
-      defaultDoc += updateText
-        .replace(/(\[date\])/g, new Date().toUTCString())
-        .replace(/(\[user\])/g, (user.username as string) || '')
       return defaultDoc.replace(/\n\s*\n/g, '\n\n')
     }
 
