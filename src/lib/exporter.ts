@@ -82,9 +82,9 @@ export default class GraphQLDocGenerator implements Paw.Generator {
   private ctx!: Paw.Context
 
   private requestHeaderRegx = [
-    /(<!--.?request:headers(:collapsed)?.?-->)/gm,
-    /(<!--.?request:headers.?-->)/gm,
-    /(<!--.?request:headers:collapsed.?-->)/gm,
+    /(<!--.?request:headers(:collapsed)?.?-->)/g,
+    /(<!--.?request:headers.?-->)/g,
+    /(<!--.?request:headers:collapsed.?-->)/g,
   ]
 
   private requestParamsRegx = [
@@ -96,19 +96,19 @@ export default class GraphQLDocGenerator implements Paw.Generator {
   private requestBodyRegx = [
     /(<!--.?request:body(:collapsed)?.?-->)/g,
     /(<!--.?request:body.?-->)/g,
-    /(<!--.?request:body(:collapsed)?.?-->)/g,
+    /(<!--.?request:body:collapsed.?-->)/g,
   ]
 
   private responseHeadersRegx = [
     /(<!--.?response:headers(:collapsed)?.?-->)/g,
     /(<!--.?response:headers.?-->)/g,
-    /(<!--.?response:headers:collapsed.?-->)/gm,
+    /(<!--.?response:headers:collapsed.?-->)/g,
   ]
 
   private responseBodyRegx = [
-    /(<!--.?response:body(:collapsed)?.?-->)/gm,
+    /(<!--.?response:body(:collapsed)?.?-->)/g,
     /(<!--.?response:body.?-->)/gm,
-    /(<!--.?response:body:collapsed.?-->)/gm,
+    /(<!--.?response:body:collapsed.?-->)/g,
   ]
 
   public generate(
@@ -174,8 +174,8 @@ export default class GraphQLDocGenerator implements Paw.Generator {
       children.push(`\n## ${requestItem.name}\n`, items)
     } else {
       const item = this.buildRequestDoc(requestItem, user, tree)
-      // children.push(item)
-      logger.log(item)
+      children.push(item)
+      // logger.log(item)
     }
 
     return children.join('\n')
@@ -190,10 +190,8 @@ export default class GraphQLDocGenerator implements Paw.Generator {
       return ''
     }
 
-    const isDescriptionEmpty =
-      (request && request.description && request.description.length === 0) ||
-      !/(<!--.?.*.?-->)/gm.test(request.description)
-
+    // const isDescriptionEmpty = request && request.description
+    const isDescriptionEmpty = !/(<!--.?.*.?-->)/gm.test(request.description)
     const parent = request.parent
 
     if (parent) {
@@ -225,8 +223,9 @@ export default class GraphQLDocGenerator implements Paw.Generator {
       return defaultDoc.replace(/\n\s*\n/g, '\n\n')
     }
 
-    let customDoc = `### ${request.name}\n\n`
+    let customDoc = frontMatter(request, user.username as string, tree)
 
+    customDoc += `### ${request.name}\n\n`
     customDoc += request.description.slice()
 
     if (this.requestHeaderRegx[0].test(customDoc)) {
@@ -271,7 +270,7 @@ export default class GraphQLDocGenerator implements Paw.Generator {
 
       if (this.requestBodyRegx[2].test(customDoc)) {
         customDoc = customDoc.replace(
-          this.requestParamsRegx[2],
+          this.requestBodyRegx[2],
           this.insertRequestBody(request, true),
         )
       }
@@ -315,8 +314,6 @@ export default class GraphQLDocGenerator implements Paw.Generator {
           this.responseBodyRegx[1],
           this.insertResponseBody(request, false),
         )
-
-        console.log(customDoc)
       }
 
       if (this.responseBodyRegx[2].test(customDoc)) {
@@ -422,7 +419,7 @@ export default class GraphQLDocGenerator implements Paw.Generator {
       return template('text', content, 'Response Headers', collapsed)
     }
 
-    return content
+    return template('text', content, 'Response Headers', false)
   }
 
   private insertResponseBody(
